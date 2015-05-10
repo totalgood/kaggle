@@ -1,22 +1,58 @@
 import os
+import random
 from timeit import default_timer as cpu_time
 
 import pandas as pd
 from pandas import np
 
-from sklearn import ensemble, preprocessing
+from sklearn import preprocessing
 from sklearn.decomposition import PCA
 # from sklearn.feature_extraction import DictVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.linear_model import LogisticRegression
 # import sklearn.preprocessing, sklearn.decomposition, sklearn.linear_model, sklearn.pipeline
 from sklearn import metrics
+
+
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import LinearSVC
 
 # from sklearn_pandas import DataFrameMapper
 # from sklearn_pandas import cross_val_score
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data', '')
 
-df_train = pd.DataFrame.from_csv(DATA_PATH + "train.csv")
+df = pd.DataFrame.from_csv(DATA_PATH + "train.csv")
+
+# N = len(df)  # ~60k
+# TEST_PORTION = 0.25
+# test_set_i = np.array(sorted(random.sample(xrange(N), int(TEST_PORTION * N))))
+# train_set_i = np.array([i for i in range(N) if i not in test_set_i])
+# ts_ids = df.index.values[train_set_i]
+# ts_targets = df.target.values
+# ts_features = df[train_feature_names].values
+
+train_label_set = sample_label_set
+train_feature_names = df.columns[:-1]  # 93 features, last col is target (true classification)
+
+train_ids = df.index.values[train_set_i]
+train_targets = df.target.values
+train_features = df[train_feature_names].values
+del df
+
+test_target = np.array(df.target)[test_set_i]
+test_set = df.values[test_set_i]
+train_set = data[train_set_i]
+train_target = np.array(digits.target)[train_set_i]
+
+
+X_train = X[:train_samples]
+X_test = X[train_samples:]
+y_train = y[:train_samples]
+y_test = y[train_samples:]
+
 
 test = pd.read_csv(DATA_PATH + "test.csv")
 # only realy need this to make sure you get the Category labels right and in the right order
@@ -25,12 +61,6 @@ sample_label_set = sample_submission.columns[1:]  # e.g. Class_1, Class_2, ...
 sample_ids = sample_submission.id.values
 del sample_submission
 
-train_label_set = sample_label_set
-train_feature_names = df_train.columns[:-1]  # don't includ the target column label
-train_ids = df_train.index.values
-train_targets = df_train.target.values
-train_features = df_train[train_feature_names].values
-del df_train
 test = test.drop('id', axis=1)
 
 # transform counts into Term Frequency x Inverse Document Frequency (normalized term frequency) features
@@ -56,10 +86,10 @@ assert(all(sample_label_set[i] == 'Class_{}'.format(i+1) == train_targets[np.whe
        for i in range(len(sample_label_set))))
 
 # train a random forest classifier
-rfc = ensemble.RandomForestClassifier(n_jobs=-1, n_estimators=300)
+rfc = RandomForestClassifier(n_jobs=-1, n_estimators=300)
 print('Training a random forest on the training set...')
 t0 = cpu_time()
-#  `train_features_tfidf` = 93 x 60k matrix of term frequencies normalized (divided by) document frequencies
+#  `train_features_tfidf` = 60k x 93 matrix of term frequencies normalized (divided by) document frequencies
 #  `train_targets` = array(['Class_1', 'Class_1', 'Class_1', ..., 'Class_9', 'Class_9', 'Class_9'], dtype=object)
 
 rfc.fit(train_features_tfidf, train_targets)
@@ -75,14 +105,13 @@ for i in range(len(train_actual)):
     train_actual.iloc[i, train_targets_encoded[i]] = 1
 ll_rfc = metrics.log_loss(train_actual.values, rfc_preds.values)
 print('log loss for Random Forest: {}'.format(ll_rfc))
-
-print("Training set predictions took {} sec of the CPU's time.".format(cpu_time() - t0))
+print("Predictions on training set features took {} sec of the CPU's time.".format(cpu_time() - t0))
 
 print("Writing a Kaggle submission csv file")
 t0 = cpu_time()
 # create submission file
 submission_df = pd.DataFrame(rfc.predict_proba(test), index=sample_ids, columns=sample_label_set)
-submission_df.to_csv('random_forest_270_submission.csv', index_label='id')
+submission_df.to_csv('random_forest_300_submission.csv', index_label='id')
 
 
 ###################################################################################################
@@ -92,20 +121,25 @@ submission_df.to_csv('random_forest_270_submission.csv', index_label='id')
 print('Decomposing the features in the {} training set records with PCA...'.format(len(train_features_tfidf)))
 t0 = cpu_time()
 pca = PCA(n_components=10)
-pca.fit(train_features_tfidf)
+train_features_tfidf_pc = pca.fit_transform(train_features_tfidf)
 print("PCA took {} sec of the CPU's time.".format(cpu_time() - t0))
 
-train_components = pca.fit_transform(train_features_tfidf)
-
-pca_rfc = ensemble.RandomForestClassifier(n_jobs=-1, n_estimators=200)
+pca_rfc = RandomForestClassifier(n_jobs=-1, n_estimators=200)
 print('Training a random forest on the Principal Components of the training set...')
 t0 = cpu_time()
-pca_rfc.fit(train_components, train_targets)
+pca_rfc.fit(train_features_tfidf_pc, train_targets)
 print("Random Forest on PCA features took {} sec of the CPU's time.".format(cpu_time() - t0))
 
-print('Rerunning the predictor to predict the the labels for the {} training set records...'.format(len(train_features_tfidf)))
+print('Rerunning the predictor to predict the labels for the {} training set records...'.format(len(train_features_tfidf)))
 t0 = cpu_time()
-pca_rfc_preds = pd.DataFrame(pca_rfc.predict_proba(train_features_tfidf), index=train_ids, columns=sample_label_set)
+#  `train_features_tfidf` = 60k x 93 matrix of term frequencies normalized (divided by) document frequencies
+#  model has only 10 features (principle components)
+#  so need to xform the features to principle components
+pca_rfc_preds = pca_rfc.predict_proba(train_features_tfidf_pc)
+print('PCA predictions are of shape {}'.format(pca_rfc_preds.shape))
+print('len(train_ids) = len(pca_rfc_preds) :: {} = {}'.format(len(train_ids), len(pca_rfc_preds)))
+print('len(sample_label_set) = {}'.format(len(sample_label_set)))
+pca_rfc_preds = pd.DataFrame(pca_rfc_preds, index=train_ids, columns=sample_label_set)
 ll_pca_rfc = metrics.log_loss(train_actual.values, pca_rfc_preds.values)
 print('log loss for PCA random forest: {}'.format(ll_pca_rfc))
 
