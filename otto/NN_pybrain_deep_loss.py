@@ -28,8 +28,10 @@ import util as otto
 
 try:
     DATA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data', '')
+    SUBMISSIONS_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'submissions', '')
 except:
     DATA_PATH = os.path.join('data', '')
+    SUBMISSIONS_PATH = os.path.join('submissions', '')
 
 df = pd.DataFrame.from_csv(DATA_PATH + "train.csv")
 df_submission = pd.DataFrame.from_csv(DATA_PATH + "sample_submission.csv")
@@ -77,8 +79,9 @@ NetworkWriter.writeToFile(trainer.module, nlp.make_timetag() + '.xml')
 predicted_prob = pd.np.clip(pd.DataFrame((pd.np.array(trainer.module.activate(i)) for i in trainer.ds['input']),
                                          columns=class_labels), 0, 1)
 
-log_loss = otto.log_loss(ds['target'], pd.np.clip(predicted_prob.values, 0, 1))
-print('The log loss for the training set was {:.3}'.format(log_loss))
+log_losses = [round(otto.log_loss(ds['target'], otto.normalize(predicted_prob.values), method=m).sum(), 3)
+              for m in 'ksfohe']
+print('The log losses for the training set were {}'.format(log_losses))
 # df = pd.DataFrame(table, columns=columns, index=df.index[max(delays):])
 
 
@@ -100,7 +103,4 @@ print('Finished transforming the test data using the trained TFIDF.')
 # columns = feature_labels + target_labels + ['Predicted--{}'.format(outp) for outp in target_labels]
 df_test = pd.DataFrame((pd.np.array(trainer.module.activate(i)) for i in df_test.values),
                        index=test_ids, columns=class_labels)
-df_test.index.name = 'id'
-df_test = df_test.clip(0, 1)
-df_test = df_test.div(df_test.sum(axis=1), axis=0)
-df_test.to_csv(__file__ + '.csv')
+otto.submit(df_test)
