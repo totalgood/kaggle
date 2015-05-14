@@ -74,7 +74,7 @@ def submit(table, filename=None, path='submissions', **kwargs):
     filename = str(filename).strip()
     filename = nlp.update_file_ext(filename, ext='.csv')
 
-    if all(isinstance(s, basestring) for s in table):
+    if isinstance(table, (list, tuple)) and all(isinstance(s, basestring) for s in table):
         fn = table[0]
         df = normalize_dataframe(pd.DataFrame.from_csv(fn))
         for fn in table[1:]:
