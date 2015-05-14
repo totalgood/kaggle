@@ -66,12 +66,12 @@ print("Transforming labels from text took {} sec of the CPU's time.".format(cpu_
 
 ds = ann.dataset_from_dataframe(df_freq, normalize=False, delays=[0], inputs=feature_labels, outputs=class_labels,
                                 verbosity=1)
-nn = ann.ann_from_ds(ds, N_hidden=[27, 18, 12], hidden_layer_type=['Linear', 'Linear', 'Sigmoid'],
-                     output_layer_type='Sigmoid', verbosity=1)
+nn = ann.ann_from_ds(ds, N_hidden=[27, 18, 12], hidden_layer_type=['Linear', 'Linear', 'Linear'],
+                     output_layer_type='Linear', verbosity=1)
 
 
 trainer = ann.build_trainer(nn, ds=ds, verbosity=1)
-trainer.trainUntilConvergence(maxEpochs=80, verbose=True)
+trainer.trainUntilConvergence(maxEpochs=700, verbose=True)
 
 NetworkWriter.writeToFile(trainer.module, nlp.make_timetag() + '.xml')
 
@@ -79,7 +79,7 @@ NetworkWriter.writeToFile(trainer.module, nlp.make_timetag() + '.xml')
 predicted_prob = pd.np.clip(pd.DataFrame((pd.np.array(trainer.module.activate(i)) for i in trainer.ds['input']),
                                          columns=class_labels), 0, 1)
 
-log_losses = [round(otto.log_loss(ds['target'], otto.normalize(predicted_prob.values), method=m).sum(), 3)
+log_losses = [round(otto.log_loss(ds['target'], otto.normalize_dataframe(predicted_prob).values, method=m).sum(), 3)
               for m in 'ksfohe']
 print('The log losses for the training set were {}'.format(log_losses))
 # df = pd.DataFrame(table, columns=columns, index=df.index[max(delays):])

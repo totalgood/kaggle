@@ -1,10 +1,14 @@
-"""Scripts to normalize and combine Kaggle submissions"""
+"""Scripts to normalize and combine Kaggle submissions
 
+"""
 import os
 import pandas as pd
 np = pd.np
 
 from pug.nlp import util as nlp
+
+from sklearn import metrics
+import scipy as sp
 
 INF = float('inf')
 
@@ -17,7 +21,7 @@ except:
     SUBMISSIONS_PATH = os.path.join('submissions', '')
 
 
-def normalize(table, epsilon=1e-15, **kwargs):
+def normalize_dataframe(table, epsilon=1e-15, **kwargs):
     """Force all rows of a table (csv file, ndarray, list of lists, DataFrame) to be probabilities
 
     All values will be floats ranging between epsilon and 1 - epsilon, inclusive.
@@ -36,9 +40,9 @@ def normalize(table, epsilon=1e-15, **kwargs):
 def one_hot(table):
     table = pd.np.array(table)
     if len(table.shape) > 1:
-        table = normalize(table)
+        table = normalize_dataframe(table)
     else:
-        table = normalize(pd.np.array([list(table)]))
+        table = normalize_dataframe(pd.np.array([list(table)]))
     return 1 * (table > 0.5)
 
 
@@ -70,20 +74,20 @@ def submit(table, filename=None, path='submissions', **kwargs):
     filename = str(filename).strip()
     filename = nlp.update_file_ext(filename, ext='.csv')
 
-    if all(isinstance(s, basestring) for s in table):
+    if isinstance(table, (list, tuple)) and all(isinstance(s, basestring) for s in table):
         fn = table[0]
-        df = normalize(pd.DataFrame.from_csv(fn))
+        df = normalize_dataframe(pd.DataFrame.from_csv(fn))
         for fn in table[1:]:
-            df += normalize(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+            df += normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
         submit(df, filename=filename, path=path, **kwargs)
 
-    df = normalize(table, **kwargs)
+    df = normalize_dataframe(table, **kwargs)
     df.index.name = 'id'
     df.to_csv(os.path.join(path, filename))
     return df.sum()
 
 
-def log_loss(act, pred, normalizer=normalize, epsilon=1e-15, method='kaggle'):
+def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='kaggle'):
     """Log Loss function for Kaggle Otto competition
 
     Surprisingly, each method implemented below produces a different answer
@@ -108,10 +112,11 @@ def log_loss(act, pred, normalizer=normalize, epsilon=1e-15, method='kaggle'):
     0.11...
     """
     method = str(method).lower().strip()[:1]
-    act, pred = np.array(act), np.array(pred)
+    act = pd.np.array(act, dtype=pd.np.int)
+    pred = pd.np.array(pred, dtype=pd.np.float64)
     if normalizer:
-        act = one_hot(act)
-        pred = normalizer(pred)
+        act = one_best(act)
+        pred = pd.np.array(normalizer(pred), dtype=pd.np.float64)
     # "forum" method: code found on Kaggle Otto Challenge forum, with lots of bugs
     if method == 'f':
         pred[pred < epsilon] = epsilon
@@ -123,11 +128,9 @@ def log_loss(act, pred, normalizer=normalize, epsilon=1e-15, method='kaggle'):
         #        NOT the order they appear in the sample rows
         # metrics.log_loss(["spam", "ham", "ham", "spam"],[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
         # metrics.log_loss(pd.np.array([[0,1],[1,0],[1,0],[0,1]]),[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
-        from sklearn import metrics
         return metrics.log_loss(act, pred)
     # python code posted online by Kaggle
     elif method == 'k':
-        import scipy as sp
         pred = sp.maximum(epsilon, pred)
         pred = sp.minimum(1 - epsilon, pred)
         ll = -1.0 * np.mean(act * sp.log(pred) + sp.subtract(1, act) * sp.log(sp.subtract(1, pred)))
@@ -148,7 +151,7 @@ def log_loss(act, pred, normalizer=normalize, epsilon=1e-15, method='kaggle'):
     # Signed error function that is proportional to log loss, but not limited and useful for NN backprop
     elif method == 'e':
         return err_fun(act, pred)
-log_loss.methods = 'forum', 'scipy', 'kaggle', 'hobs'
+log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs', 'error'
 
 
 def safe_log(x, limit=1e9):
