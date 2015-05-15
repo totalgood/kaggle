@@ -2,12 +2,18 @@
 
 """
 import os
+from timeit import default_timer as cpu_time
 import pandas as pd
 np = pd.np
 
 from pug.nlp import util as nlp
 
 from sklearn import metrics
+from sklearn import preprocessing
+# from sklearn.decomposition import PCA
+# from sklearn.feature_extraction import DictVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+
 import scipy as sp
 
 INF = float('inf')
@@ -76,18 +82,28 @@ def submit(table, filename=None, path='submissions', **kwargs):
 
     if isinstance(table, (list, tuple)) and all(isinstance(s, basestring) for s in table):
         fn = table[0]
-        df = normalize_dataframe(pd.DataFrame.from_csv(fn))
+        df = normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+        print(df.describe())
+        print('=' * 100)
         for fn in table[1:]:
             df += normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+            print(df.describe())
+            print('-' * 100)
         submit(df, filename=filename, path=path, **kwargs)
-
-    df = normalize_dataframe(table, **kwargs)
-    df.index.name = 'id'
-    df.to_csv(os.path.join(path, filename))
+    else:
+        print('=' * 100)
+        print(table.describe())
+        df = normalize_dataframe(table, **kwargs)
+        print(df.describe())
+        df.index.name = 'id'
+        try:
+            df.to_csv(os.path.join(path, filename))
+        except:
+            df.to_csv(filename)
     return df.sum()
 
 
-def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='kaggle'):
+def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='all'):
     """Log Loss function for Kaggle Otto competition
 
     Surprisingly, each method implemented below produces a different answer
@@ -151,7 +167,10 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='k
     # Signed error function that is proportional to log loss, but not limited and useful for NN backprop
     elif method == 'e':
         return err_fun(act, pred)
-log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs', 'error'
+    # all methods
+    elif method == 'a':
+        return [log_loss(act, pred, normalizer=normalizer, epsilon=1e-15, method=m) for m in log_loss.methods]
+log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs'
 
 
 def safe_log(x, limit=1e9):
@@ -171,3 +190,35 @@ def err_fun(act, pred):
     True
     """
     return -1. * safe_log(1.0 + act * pred)
+
+
+def binarize_text_categories(df, class_labels=9, target_column='target',
+                             encoded_column=None, in_place=False, verbosity=1):
+    if isinstance(class_labels, int) and 1e12 > class_labels > 0:
+        ndigit = int((class_labels + 1) / 10.) + 1
+        class_labels = [('Category_{:0' + str(ndigit) + 'd}').format(i + 1) for i in range(class_labels)]
+    if verbosity > 0:
+        print('Transforming {} labels from text (class names) into an integer ENUM...'.format(
+              len(class_labels)))
+        print('class_labels: {}'.format(class_labels))
+    t0 = cpu_time()
+    if target_column is None:
+        target_column = df.columns[-1]
+    if isinstance(target_column, int) and -len(df.columns) <= target_column < len(df.columns):
+        target_column = df.columns[target_column]
+    if encoded_column is None:
+        encoded_column = 'encoded_' + str(target_column.strip())
+    classification_encoder = preprocessing.LabelEncoder()
+    binary_categorizer = preprocessing.OneHotEncoder(categorical_features='all', dtype=float, handle_unknown='error',
+                                                     n_values=len(class_labels), sparse=False)
+    df[encoded_column] = classification_encoder.fit_transform(df[target_column])
+    binary_classes = binary_categorizer.fit_transform(df[encoded_column].values.reshape(len(df), 1))
+    if verbosity > 0:
+        print("Transforming labels from text took {} sec of the CPU's time.".format(cpu_time() - t0))
+        print("Transformed DataFrame.describe():\n{}".format(df.describe()))
+    if in_place:
+        for i, label in enumerate(class_labels):
+            df[label] = binary_classes[:, i]
+        return df
+    else:
+        return pd.DataFrame(binary_classes, index=df.index)
