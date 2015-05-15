@@ -196,7 +196,7 @@ def binarize_text_categories(df, class_labels=9, target_column='target',
                              encoded_column=None, in_place=False, verbosity=1):
     if isinstance(class_labels, int) and 1e12 > class_labels > 0:
         ndigit = int((class_labels + 1) / 10.) + 1
-        class_labels = [('Category_{:0' + str(ndigit) + 'd}').format(i + 1) for i in range(class_labels)]
+        class_labels = [('Class_{:0' + str(ndigit) + 'd}').format(i + 1) for i in range(class_labels)]
     if verbosity > 0:
         print('Transforming {} labels from text (class names) into an integer ENUM...'.format(
               len(class_labels)))
@@ -221,4 +221,4 @@ def binarize_text_categories(df, class_labels=9, target_column='target',
             df[label] = binary_classes[:, i]
         return df
     else:
-        return pd.DataFrame(binary_classes, index=df.index)
+        return pd.DataFrame(binary_classes, columns=class_labels, index=df.index)
