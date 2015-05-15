@@ -17,6 +17,7 @@ from sklearn.feature_extraction.text import TfidfTransformer
 import scipy as sp
 
 INF = float('inf')
+EPSILON = 1e-15
 
 
 try:
@@ -103,7 +104,7 @@ def submit(table, filename=None, path='submissions', **kwargs):
     return df.sum()
 
 
-def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='all'):
+def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=EPSILON, method='all'):
     """Log Loss function for Kaggle Otto competition
 
     Surprisingly, each method implemented below produces a different answer
@@ -131,7 +132,7 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='a
     act = pd.np.array(act, dtype=pd.np.int)
     pred = pd.np.array(pred, dtype=pd.np.float64)
     if normalizer:
-        act = one_best(act)
+        act = pd.np.array(one_best(act))
         pred = pd.np.array(normalizer(pred), dtype=pd.np.float64)
     # "forum" method: code found on Kaggle Otto Challenge forum, with lots of bugs
     if method == 'f':
@@ -140,7 +141,7 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='a
         return -1. * (sum(act * np.log(pred))).mean()
     # scikit learn metric (similar to what Kaggle posted online?)
     elif method == 's':
-        # FIXME: Make sure to "indicator matrix" columns are in the same order as the sorted class labels/names
+        # FIXME: Make sure "indicator matrix" columns are in the same order as the sorted class labels/names
         #        NOT the order they appear in the sample rows
         # metrics.log_loss(["spam", "ham", "ham", "spam"],[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
         # metrics.log_loss(pd.np.array([[0,1],[1,0],[1,0],[0,1]]),[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
@@ -169,27 +170,34 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='a
         return err_fun(act, pred)
     # all methods
     elif method == 'a':
-        return [log_loss(act, pred, normalizer=normalizer, epsilon=1e-15, method=m) for m in log_loss.methods]
+        return [log_loss(act, pred, normalizer=normalizer, epsilon=epsilon, method=m) for m in log_loss.methods]
 log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs'
 
 
-def safe_log(x, limit=1e9):
-    x = pd.np.array(x).clip(-INF, INF)
-    return pd.np.log(x).clip(-limit, limit)
+def safe_log(x, limit=500):
+    """Take log, ensuring that operation is invertable with exp and nonNaN"""
+    x = pd.np.clip(x, EPSILON, INF)
+    return pd.np.clip(pd.np.log(x), -limit, limit)
 
 
 def err_fun(act, pred):
-    """Signed Log of the Error
+    """Signed Log of the Error, assuming act and pred are 0 < x <= 1
 
     Loss should get smaller (less positive) as the error decreases.
-    >>> err_fun(1,.9) < err_fun(1, .8)
+    >>> abs(err_fun(1,.9)) < abs(err_fun(1, .8))
     True
-    >>> err_fun(.9, 1) < err_fun(.8, 1)
+    >>> abs(err_fun(.5,.5-1e-15)) > abs(err_fun(.5,.5-2e-15))
     True
-    >>> err_fun(0, 1) > err_fun(1e-15, 1)
+    >>> err_fun(1,.9) > 0
+    True
+    >>> err_fun(.9,1) < 0
+    True
+    >>> abs(err_fun(.9, 1)) < abs(err_fun(.8, 1))
+    True
+    >>> abs(err_fun(0, 1)) > abs(err_fun(2e-15, 1))
     True
     """
-    return -1. * safe_log(1.0 + act * pred)
+    return pd.np.sign(act - pred) * safe_log(1 + pd.np.clip(pd.np.abs(act - pred), EPSILON, 1 - EPSILON))
 
 
 def binarize_text_categories(df, class_labels=9, target_column='target',
