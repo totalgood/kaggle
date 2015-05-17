@@ -2,6 +2,7 @@
 
 """
 import os
+import itertools
 from timeit import default_timer as cpu_time
 import pandas as pd
 np = pd.np
@@ -230,3 +231,30 @@ def binarize_text_categories(df, class_labels=9, target_column='target',
         return df
     else:
         return pd.DataFrame(binary_classes, columns=class_labels, index=df.index)
+
+
+def cologloss(paths=None, verbosity=1):
+    """Matrix of loglosses analogous to inverse covariance matrix
+
+    "distance" between sumbission CSVs
+    """
+    if paths is None:
+        paths = 'submissions'
+    if isinstance(paths, basestring):
+        paths = [f['path'] for f in nlp.find_files(paths, ext='csv', level=1)]
+    N = len(paths)
+    coloss = np.identity(N)
+    if verbosity:
+        for i, path in enumerate(paths):
+            print("{}: {}".format(i, path))
+    for row, col in itertools.product(range(N), range(N)):
+        # compute for upper diag only, copy to lower diag
+        if row < col:
+            if verbosity > 1:
+                print('Calculating log_loss for {} -> {}'.format(paths[row], paths[col]))
+            df_row = pd.DataFrame.from_csv(paths[row])
+            df_col = pd.DataFrame.from_csv(paths[col])
+            coloss[row, col] = coloss[col, row] = log_loss(df_row, df_col, method='kaggle')
+            if verbosity > 0:
+                print("{} <-->- {} = {}".format(row, col, coloss[row, col]))
+    return coloss
