@@ -2,15 +2,23 @@
 
 """
 import os
+import itertools
+from timeit import default_timer as cpu_time
 import pandas as pd
 np = pd.np
 
 from pug.nlp import util as nlp
 
 from sklearn import metrics
+from sklearn import preprocessing
+# from sklearn.decomposition import PCA
+# from sklearn.feature_extraction import DictVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+
 import scipy as sp
 
 INF = float('inf')
+EPSILON = 1e-15
 
 
 try:
@@ -21,7 +29,7 @@ except:
     SUBMISSIONS_PATH = os.path.join('submissions', '')
 
 
-def normalize_dataframe(table, epsilon=1e-15, **kwargs):
+def normalize_dataframe(table, epsilon=1e-15, exponent=1.0, **kwargs):
     """Force all rows of a table (csv file, ndarray, list of lists, DataFrame) to be probabilities
 
     All values will be floats ranging between epsilon and 1 - epsilon, inclusive.
@@ -33,8 +41,10 @@ def normalize_dataframe(table, epsilon=1e-15, **kwargs):
         df = pd.DataFrame.from_csv(filename)
     else:
         df = pd.DataFrame(table, **kwargs)
-    df = df.clip(epsilon, 1 - epsilon)
-    return df.div(df.sum(axis=1), axis=0)
+    df = df.clip(epsilon, 1 - epsilon).div(df.sum(axis=1), axis=0)
+    if exponent != 1:
+        return normalize_dataframe(df ** exponent, exponent=1)
+    return df
 
 
 def one_hot(table):
@@ -76,18 +86,28 @@ def submit(table, filename=None, path='submissions', **kwargs):
 
     if isinstance(table, (list, tuple)) and all(isinstance(s, basestring) for s in table):
         fn = table[0]
-        df = normalize_dataframe(pd.DataFrame.from_csv(fn))
+        df = normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+        print(df.describe())
+        print('=' * 100)
         for fn in table[1:]:
             df += normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+            print(df.describe())
+            print('-' * 100)
         submit(df, filename=filename, path=path, **kwargs)
-
-    df = normalize_dataframe(table, **kwargs)
-    df.index.name = 'id'
-    df.to_csv(os.path.join(path, filename))
+    else:
+        print('=' * 100)
+        print(table.describe())
+        df = normalize_dataframe(table, **kwargs)
+        print(df.describe())
+        df.index.name = 'id'
+        try:
+            df.to_csv(os.path.join(path, filename))
+        except:
+            df.to_csv(filename)
     return df.sum()
 
 
-def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='kaggle'):
+def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=EPSILON, method='all'):
     """Log Loss function for Kaggle Otto competition
 
     Surprisingly, each method implemented below produces a different answer
@@ -115,7 +135,7 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='k
     act = pd.np.array(act, dtype=pd.np.int)
     pred = pd.np.array(pred, dtype=pd.np.float64)
     if normalizer:
-        act = one_best(act)
+        act = pd.np.array(one_best(act))
         pred = pd.np.array(normalizer(pred), dtype=pd.np.float64)
     # "forum" method: code found on Kaggle Otto Challenge forum, with lots of bugs
     if method == 'f':
@@ -124,7 +144,7 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='k
         return -1. * (sum(act * np.log(pred))).mean()
     # scikit learn metric (similar to what Kaggle posted online?)
     elif method == 's':
-        # FIXME: Make sure to "indicator matrix" columns are in the same order as the sorted class labels/names
+        # FIXME: Make sure "indicator matrix" columns are in the same order as the sorted class labels/names
         #        NOT the order they appear in the sample rows
         # metrics.log_loss(["spam", "ham", "ham", "spam"],[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
         # metrics.log_loss(pd.np.array([[0,1],[1,0],[1,0],[0,1]]),[[.1, .9], [.9, .1], [.8, .2], [.35, .65]])
@@ -151,23 +171,102 @@ def log_loss(act, pred, normalizer=normalize_dataframe, epsilon=1e-15, method='k
     # Signed error function that is proportional to log loss, but not limited and useful for NN backprop
     elif method == 'e':
         return err_fun(act, pred)
-log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs', 'error'
+    # all methods
+    elif method == 'a':
+        return [log_loss(act, pred, normalizer=normalizer, epsilon=epsilon, method=m) for m in log_loss.methods]
+log_loss.methods = 'kaggle', 'scipy', 'forum', 'other', 'hobs'
 
 
-def safe_log(x, limit=1e9):
-    x = pd.np.array(x).clip(-INF, INF)
-    return pd.np.log(x).clip(-limit, limit)
+def safe_log(x, limit=500):
+    """Take log, ensuring that operation is invertable with exp and nonNaN"""
+    x = pd.np.clip(x, EPSILON, INF)
+    return pd.np.clip(pd.np.log(x), -limit, limit)
 
 
 def err_fun(act, pred):
-    """Signed Log of the Error
+    """Signed Log of the Error, assuming act and pred are 0 < x <= 1
 
     Loss should get smaller (less positive) as the error decreases.
-    >>> err_fun(1,.9) < err_fun(1, .8)
+    >>> abs(err_fun(1,.9)) < abs(err_fun(1, .8))
     True
-    >>> err_fun(.9, 1) < err_fun(.8, 1)
+    >>> abs(err_fun(.5,.5-1e-15)) > abs(err_fun(.5,.5-2e-15))
     True
-    >>> err_fun(0, 1) > err_fun(1e-15, 1)
+    >>> err_fun(1,.9) > 0
+    True
+    >>> err_fun(.9,1) < 0
+    True
+    >>> abs(err_fun(.9, 1)) < abs(err_fun(.8, 1))
+    True
+    >>> abs(err_fun(0, 1)) > abs(err_fun(2e-15, 1))
     True
     """
-    return -1. * safe_log(1.0 + act * pred)
+    return pd.np.sign(act - pred) * safe_log(1 + pd.np.clip(pd.np.abs(act - pred), EPSILON, 1 - EPSILON))
+
+
+def binarize_text_categories(df, class_labels=9, target_column='target',
+                             encoded_column=None, in_place=False, verbosity=1):
+    if isinstance(class_labels, int) and 1e12 > class_labels > 0:
+        ndigit = int((class_labels + 1) / 10.) + 1
+        class_labels = [('Class_{:0' + str(ndigit) + 'd}').format(i + 1) for i in range(class_labels)]
+    if verbosity > 0:
+        print('Transforming {} labels from text (class names) into an integer ENUM...'.format(
+              len(class_labels)))
+        print('class_labels: {}'.format(class_labels))
+    t0 = cpu_time()
+    if target_column is None:
+        target_column = df.columns[-1]
+    if isinstance(target_column, int) and -len(df.columns) <= target_column < len(df.columns):
+        target_column = df.columns[target_column]
+    if encoded_column is None:
+        encoded_column = 'encoded_' + str(target_column.strip())
+    classification_encoder = preprocessing.LabelEncoder()
+    binary_categorizer = preprocessing.OneHotEncoder(categorical_features='all', dtype=float, handle_unknown='error',
+                                                     n_values=len(class_labels), sparse=False)
+    df[encoded_column] = classification_encoder.fit_transform(df[target_column])
+    binary_classes = binary_categorizer.fit_transform(df[encoded_column].values.reshape(len(df), 1))
+    if verbosity > 0:
+        print("Transforming labels from text took {} sec of the CPU's time.".format(cpu_time() - t0))
+        print("Transformed DataFrame.describe():\n{}".format(df.describe()))
+    if in_place:
+        for i, label in enumerate(class_labels):
+            df[label] = binary_classes[:, i]
+        return df
+    else:
+        return pd.DataFrame(binary_classes, columns=class_labels, index=df.index)
+
+
+def coloss(paths=None, verbosity=1, upper_only=False):
+    """Matrix of loglosses analogous to inverse covariance matrix
+
+    "distance" between sumbission CSVs
+    """
+    if paths is None:
+        paths = 'submissions'
+    if isinstance(paths, basestring):
+        paths = [f['path'] for f in nlp.find_files(paths, ext='csv', level=1)]
+    N = len(paths)
+    cl = np.identity(N)
+    if verbosity:
+        for i, path in enumerate(paths):
+            print("{}: {}".format(i, path))
+    for row, col in itertools.product(range(N), range(N)):
+        # compute for upper diag only, copy to lower diag
+        if row != col and (not upper_only or row < col):
+            if verbosity > 1:
+                print('Calculating log_loss for {} -> {}'.format(paths[row], paths[col]))
+            df_row = normalize_dataframe(pd.DataFrame.from_csv(paths[row]))
+            df_col = normalize_dataframe(pd.DataFrame.from_csv(paths[col]))
+            cl[col, row] = log_loss(df_row, df_col, method='kaggle')
+            if upper_only:
+                cl[row, col] = cl[col, row]
+            if verbosity > 0:
+                print("{} <-->- {} = {}".format(row, col, cl[row, col]))
+    if verbosity > 0:
+        print(np.round(cl, 3))
+    pd.DataFrame(cl, columns=paths, index=paths)
+    return cl
+
+
+def anscombe(x):
+    """A top-of-the-board H2o score transformed the data first"""
+    return np.sqrt(4 * x + 1.5)

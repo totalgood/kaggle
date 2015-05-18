@@ -64,11 +64,11 @@ for i, label in enumerate(class_labels):
     df_freq[label] = binary_classes[:, i]
 print("Transforming labels from text took {} sec of the CPU's time.".format(cpu_time() - t0))
 
-ds = ann.dataset_from_dataframe(df_freq, normalize=False, delays=[0], inputs=feature_labels, outputs=class_labels,
+ds = ann.dataset_from_dataframe(df_freq, normalize=False, delays=[0],
+                                inputs=feature_labels, outputs=class_labels,
                                 verbosity=1)
 nn = ann.ann_from_ds(ds, N_hidden=[12, 10], hidden_layer_type=['Sigmoid', 'Sigmoid'],
                      output_layer_type='Linear', verbosity=1)
-
 
 trainer = ann.build_trainer(nn, ds=ds, verbosity=1)
 trainer.trainUntilConvergence(maxEpochs=700, verbose=True)
