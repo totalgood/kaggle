@@ -29,7 +29,7 @@ except:
     SUBMISSIONS_PATH = os.path.join('submissions', '')
 
 
-def normalize_dataframe(table, epsilon=1e-15, **kwargs):
+def normalize_dataframe(table, epsilon=1e-15, exponent=1.0, **kwargs):
     """Force all rows of a table (csv file, ndarray, list of lists, DataFrame) to be probabilities
 
     All values will be floats ranging between epsilon and 1 - epsilon, inclusive.
@@ -41,8 +41,10 @@ def normalize_dataframe(table, epsilon=1e-15, **kwargs):
         df = pd.DataFrame.from_csv(filename)
     else:
         df = pd.DataFrame(table, **kwargs)
-    df = df.clip(epsilon, 1 - epsilon)
-    return df.div(df.sum(axis=1), axis=0)
+    df = df.clip(epsilon, 1 - epsilon).div(df.sum(axis=1), axis=0)
+    if exponent != 1:
+        return normalize_dataframe(df ** exponent, exponent=1)
+    return df
 
 
 def one_hot(table):
@@ -233,7 +235,7 @@ def binarize_text_categories(df, class_labels=9, target_column='target',
         return pd.DataFrame(binary_classes, columns=class_labels, index=df.index)
 
 
-def cologloss(paths=None, verbosity=1):
+def coloss(paths=None, verbosity=1, upper_only=False):
     """Matrix of loglosses analogous to inverse covariance matrix
 
     "distance" between sumbission CSVs
@@ -243,18 +245,23 @@ def cologloss(paths=None, verbosity=1):
     if isinstance(paths, basestring):
         paths = [f['path'] for f in nlp.find_files(paths, ext='csv', level=1)]
     N = len(paths)
-    coloss = np.identity(N)
+    cl = np.identity(N)
     if verbosity:
         for i, path in enumerate(paths):
             print("{}: {}".format(i, path))
     for row, col in itertools.product(range(N), range(N)):
         # compute for upper diag only, copy to lower diag
-        if row < col:
+        if row != col and (not upper_only or row < col):
             if verbosity > 1:
                 print('Calculating log_loss for {} -> {}'.format(paths[row], paths[col]))
-            df_row = pd.DataFrame.from_csv(paths[row])
-            df_col = pd.DataFrame.from_csv(paths[col])
-            coloss[row, col] = coloss[col, row] = log_loss(df_row, df_col, method='kaggle')
+            df_row = normalize_dataframe(pd.DataFrame.from_csv(paths[row]))
+            df_col = normalize_dataframe(pd.DataFrame.from_csv(paths[col]))
+            cl[col, row] = log_loss(df_row, df_col, method='kaggle')
+            if upper_only:
+                cl[row, col] = cl[col, row]
             if verbosity > 0:
-                print("{} <-->- {} = {}".format(row, col, coloss[row, col]))
-    return coloss
+                print("{} <-->- {} = {}".format(row, col, cl[row, col]))
+    if verbosity > 0:
+        print(np.round(cl, 3))
+    pd.DataFrame(cl, columns=paths, index=paths)
+    return cl
