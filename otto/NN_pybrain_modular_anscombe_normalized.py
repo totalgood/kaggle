@@ -61,7 +61,7 @@ for c in df_binarized.columns:
 ds = ann.dataset_from_dataframe(df_freq, normalize=False, delays=[0], inputs=feature_labels, outputs=class_labels,
                                 verbosity=1)
 nn = ann.ann_from_ds(ds, N_hidden=[12, 9], hidden_layer_type=['Sigmoid', 'Sigmoid'],
-                     output_layer_type='Sigmoid', verbosity=1)
+                     output_layer_type='Linear', verbosity=1)
 
 trainer = ann.build_trainer(nn, ds=ds, verbosity=1)
 trainer.trainUntilConvergence(maxEpochs=1000, verbose=True)

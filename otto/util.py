@@ -251,19 +251,20 @@ def coloss(paths=None, verbosity=1, upper_only=False):
             print("{}: {}".format(i, path))
     for row, col in itertools.product(range(N), range(N)):
         # compute for upper diag only, copy to lower diag
-        if row != col and (not upper_only or row < col):
-            if verbosity > 1:
-                print('Calculating log_loss for {} -> {}'.format(paths[row], paths[col]))
-            df_row = normalize_dataframe(pd.DataFrame.from_csv(paths[row]))
-            df_col = normalize_dataframe(pd.DataFrame.from_csv(paths[col]))
-            cl[col, row] = log_loss(df_row, df_col, method='kaggle')
+        if verbosity > 1:
+            print('Calculating log_loss for {} -> {}'.format(paths[row], paths[col]))
+        if row != col:
+            if row < col or not upper_only:
+                df_row = normalize_dataframe(pd.DataFrame.from_csv(paths[row]))
+                df_col = normalize_dataframe(pd.DataFrame.from_csv(paths[col]))
+                cl[row, col] = log_loss(df_row, df_col, method='kaggle')
             if upper_only:
                 cl[row, col] = cl[col, row]
-            if verbosity > 0:
-                print("{} <-->- {} = {}".format(row, col, cl[row, col]))
+        if verbosity > 0:
+            print("CLL[{:02d}, {:02d}] = {:.4g}".format(row, col, cl[row, col]))
     if verbosity > 0:
-        print(np.round(cl, 3))
-    pd.DataFrame(cl, columns=paths, index=paths)
+        print(np.round(cl, 2))
+    cl = pd.DataFrame(cl, columns=paths, index=paths)
     return cl
 
 
