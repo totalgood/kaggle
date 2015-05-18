@@ -90,7 +90,8 @@ def submit(table, filename=None, path='submissions', **kwargs):
         print(df.describe())
         print('=' * 100)
         for fn in table[1:]:
-            df += normalize_dataframe(pd.DataFrame.from_csv(fn)) * 1. / len(table)
+            values = normalize_dataframe(pd.DataFrame.from_csv(fn)).values
+            df = pd.DataFrame(df.values * values, columns=df.columns, index=df.index)
             print(df.describe())
             print('-' * 100)
         submit(df, filename=filename, path=path, **kwargs)
