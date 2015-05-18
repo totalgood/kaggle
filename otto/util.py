@@ -265,3 +265,8 @@ def coloss(paths=None, verbosity=1, upper_only=False):
         print(np.round(cl, 3))
     pd.DataFrame(cl, columns=paths, index=paths)
     return cl
+
+
+def anscombe(x):
+    """A top-of-the-board H2o score transformed the data first"""
+    return np.sqrt(4 * x + 1.5)
